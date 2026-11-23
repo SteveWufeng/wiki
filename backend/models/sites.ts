@@ -296,7 +296,7 @@ class Sites {
           deleteOrphanedMenus: true,
           includeStorageOperations: true,
           showParentLink: true,
-          showFolderPages: true
+          showFolderPages: false
         },
         assets: {
           logo: false,
@@ -307,11 +307,11 @@ class Sites {
         theme: {
           dark: false,
           codeBlocksTheme: 'github-dark',
-          colorPrimary: '#1976D2',
+          colorPrimary: '#5E8AB4',
           colorSecondary: '#02C39A',
-          colorAccent: '#FF9800',
-          colorHeader: '#000000',
-          colorSidebar: '#1976D2',
+          colorAccent: '#F03A47',
+          colorHeader: '#041E42',
+          colorSidebar: '#5E8AB4',
           injectCSS: '',
           injectHead: '',
           injectBody: '',
@@ -322,8 +322,8 @@ class Sites {
           showPrintBtn: true,
           showPageProgress: true,
           pageTransitions: true,
-          baseFont: 'roboto',
-          contentFont: 'roboto'
+          baseFont: 'inter',
+          contentFont: 'inter'
         },
         editors: {
           asciidoc: {
@@ -777,7 +777,7 @@ class Sites {
           deleteOrphanedMenus: true,
           includeStorageOperations: true,
           showParentLink: true,
-          showFolderPages: true
+          showFolderPages: false
         },
         assets: {
           logo: false,
@@ -861,11 +861,11 @@ class Sites {
         theme: {
           dark: false,
           codeBlocksTheme: 'github-dark',
-          colorPrimary: '#1976D2',
+          colorPrimary: '#5E8AB4',
           colorSecondary: '#02C39A',
-          colorAccent: '#FF9800',
-          colorHeader: '#000000',
-          colorSidebar: '#1976D2',
+          colorAccent: '#F03A47',
+          colorHeader: '#041E42',
+          colorSidebar: '#5E8AB4',
           injectCSS: '',
           injectHead: '',
           injectBody: '',
@@ -876,8 +876,8 @@ class Sites {
           showPrintBtn: true,
           showPageProgress: true,
           pageTransitions: true,
-          baseFont: 'roboto',
-          contentFont: 'roboto'
+          baseFont: 'inter',
+          contentFont: 'inter'
         },
         uploads: {
           conflictBehavior: 'overwrite',

@@ -6,6 +6,30 @@ import { useCommonStore } from './common'
 import { useFlagsStore } from './flags'
 import { useUserStore } from './user'
 
+const NAV_EXPANDED_PREFIX = 'wiki.navExpanded:'
+const NAV_EXPANDED_LIMIT = 500
+const navPathInfoCache = new Map()
+const navSequenceCache = new Map()
+
+function normalizeNavigationPath(target, localePrefix) {
+  if (!target || /^[a-z][a-z0-9+.-]*:\/\//i.test(target) || /^(mailto:|tel:)/i.test(target)) {
+    return ''
+  }
+  let path = target.split('?')[0].split('#')[0]
+  if (!path.startsWith('/')) {
+    path = `/${path}`
+  }
+  if (localePrefix) {
+    if (path === localePrefix) {
+      path = '/home'
+    } else if (path.startsWith(`${localePrefix}/`)) {
+      path = path.slice(localePrefix.length + 1)
+    }
+  }
+  path = path.replace(/^\/+|\/+$/g, '')
+  return path || 'home'
+}
+
 /**
  * Turn the site's active locale CODES into the descriptors the UI reads.
  *
@@ -249,11 +273,11 @@ export const useSiteStore = defineStore('site', {
       injectCSS: '',
       injectHead: '',
       injectBody: '',
-      colorPrimary: '#1976D2',
+      colorPrimary: '#5E8AB4',
       colorSecondary: '#02C39A',
       colorAccent: '#f03a47',
-      colorHeader: '#000',
-      colorSidebar: '#1976D2',
+      colorHeader: '#041E42',
+      colorSidebar: '#5E8AB4',
       codeBlocksTheme: '',
       contentWidth: 'full',
       sidebarPosition: 'left',
@@ -268,6 +292,8 @@ export const useSiteStore = defineStore('site', {
     docsBase: 'https://docs.js.wiki',
     nav: {
       currentId: null,
+      displayId: null,
+      contextId: null,
       items: [],
       /*
         The menus a reader went through to reach the one on screen, by opening a `menu` item -- each as
@@ -277,6 +303,8 @@ export const useSiteStore = defineStore('site', {
       */
       stack: []
     },
+    navExpanded: [],
+    navExpandedScope: '',
     /*
       How the sidebar's menus are drawn, from the site's `navigation` settings -- the display half of
       them; the automations are the server's business alone. Off until the site says otherwise.
@@ -683,6 +711,168 @@ export const useSiteStore = defineStore('site', {
       this.tagsLoaded = false
     },
     /**
+     * Ask what sidebar menu a path resolves to.
+     *
+     * Cached per site, locale and path for the session because the sidebar asks on every page load, and
+     * the answer is usually the same folder/menu that is already on screen. Content changes clear it.
+     */
+    async fetchNavigationPathInfo(path, locale) {
+      if (!this.id || !locale) {
+        return { folderId: '', navigationId: null }
+      }
+      const key = `${this.id}:${locale}:${path ?? ''}`
+      if (navPathInfoCache.has(key)) {
+        return navPathInfoCache.get(key)
+      }
+      try {
+        const resp = await API_CLIENT.get(`sites/${this.id}/navigation/path`, {
+          searchParams: { path: path ?? '', locale }
+        }).json()
+        const info = {
+          folderId: resp?.folderId ?? '',
+          navigationId: resp?.navigationId ?? null
+        }
+        navPathInfoCache.set(key, info)
+        return info
+      } catch (err) {
+        console.warn(err.message)
+        return { folderId: '', navigationId: null }
+      }
+    },
+    clearNavigationPathCache() {
+      navPathInfoCache.clear()
+      navSequenceCache.clear()
+    },
+    /**
+     * Ask the server for the path above a menu, without the "Go up" setting in the way.
+     */
+    async fetchNavigationParentPath(id) {
+      if (!this.id || !id) {
+        return null
+      }
+      try {
+        const resp = await API_CLIENT.get(`sites/${this.id}/navigation/${id}/parent`).json()
+        return resp?.parent ?? null
+      } catch (err) {
+        console.warn(err.message)
+        return null
+      }
+    },
+    async fetchNavigationMenuItems(id) {
+      if (!this.id || !id) {
+        return []
+      }
+      try {
+        return (await API_CLIENT.get(`sites/${this.id}/navigation/${id}`).json()) ?? []
+      } catch (err) {
+        console.warn(err.message)
+        return []
+      }
+    },
+    /**
+     * Flatten the visible navigation tree in reading order.
+     *
+     * The sidebar lazy-loads folder submenus, but prev/next needs the whole ordered list of pages. This
+     * fetches only the menus reachable from `navId`, follows menu items to their submenu, and returns
+     * internal page links in the order the sidebar shows them.
+     */
+    async fetchNavigationSequence(navId, locale = this.locale) {
+      if (!this.id || !navId || !locale) {
+        return []
+      }
+      const key = `${this.id}:${navId}:${locale}`
+      if (navSequenceCache.has(key)) {
+        return navSequenceCache.get(key)
+      }
+      const prefix = this.localeUrlPrefix(locale)
+      const flatten = async (items, seen) => {
+        const out = []
+        for (const item of items ?? []) {
+          if (item.type === 'header' || item.type === 'separator') {
+            continue
+          }
+          const raw =
+            item.type === 'menu' ? item.targetPage : item.openInNewWindow ? '' : item.target
+          const path = normalizeNavigationPath(raw, prefix)
+          if (path) {
+            out.push({ title: item.label || path, path })
+          }
+          if (item.type === 'menu' && item.targetNavId && !seen.has(item.targetNavId)) {
+            seen.add(item.targetNavId)
+            out.push(...(await flatten(await this.fetchNavigationMenuItems(item.targetNavId), seen)))
+          } else if (item.children?.length > 0) {
+            out.push(...(await flatten(item.children, seen)))
+          }
+        }
+        return out
+      }
+      const promise = (async () => {
+        const items = await this.fetchNavigationMenuItems(navId)
+        return flatten(items, new Set([navId]))
+      })()
+      navSequenceCache.set(key, promise)
+      try {
+        return await promise
+      } catch (err) {
+        console.warn(err.message)
+        navSequenceCache.delete(key)
+        return []
+      }
+    },
+    isNavGroupExpanded(key) {
+      return this.navExpanded.includes(key)
+    },
+    expandNavGroup(key) {
+      if (!key || this.navExpanded.includes(key)) {
+        return
+      }
+      this.navExpanded = [...this.navExpanded, key].slice(-NAV_EXPANDED_LIMIT)
+      this.saveNavExpanded()
+    },
+    collapseNavGroup(key) {
+      const next = this.navExpanded.filter((item) => item !== key)
+      if (next.length !== this.navExpanded.length) {
+        this.navExpanded = next
+        this.saveNavExpanded()
+      }
+    },
+    loadNavExpanded(siteId, locale) {
+      if (!siteId || !locale) {
+        return
+      }
+      const scope = `${siteId}:${locale}`
+      if (this.navExpandedScope === scope) {
+        return
+      }
+      let items = []
+      try {
+        const stored = localStorage.getItem(`${NAV_EXPANDED_PREFIX}${scope}`)
+        const parsed = stored ? JSON.parse(stored) : []
+        if (Array.isArray(parsed)) {
+          items = parsed.filter((item) => typeof item === 'string')
+        }
+      } catch (err) {
+        console.warn(err.message)
+      }
+      this.$patch({
+        navExpanded: items.slice(-NAV_EXPANDED_LIMIT),
+        navExpandedScope: scope
+      })
+    },
+    saveNavExpanded() {
+      if (!this.navExpandedScope) {
+        return
+      }
+      try {
+        localStorage.setItem(
+          `${NAV_EXPANDED_PREFIX}${this.navExpandedScope}`,
+          JSON.stringify(this.navExpanded)
+        )
+      } catch (err) {
+        console.warn(err.message)
+      }
+    },
+    /**
      * Load the sidebar menu a page resolves to.
      *
      * @param id The page's `navigationId`, which addresses either a tree entry that overrides the menu
@@ -703,29 +893,91 @@ export const useSiteStore = defineStore('site', {
         this.fetchNavigationParent(id)
       ])
       this.$patch((state) => {
-        state.nav = { currentId: id, items: items ?? [], stack: [] }
+        state.nav = {
+          currentId: id,
+          displayId: id,
+          contextId: null,
+          items: items ?? [],
+          stack: []
+        }
         if (navParent) {
           state.navParent = navParent
         }
       })
     },
     /**
-     * Show the menu a page resolves to, putting away any menu opened on the way.
+     * Show the sidebar menu for a page, carrying the folder context into pages inside that folder.
      *
-     * Asked on every page load, not only when the page's menu changes: following a link out of an
-     * opened menu lands on a page that very often resolves to that same menu, and it is shown then as
-     * the page's own -- without "Go back".
+     * A page directly inside a folder usually resolves to the folder's own menu. That menu replaces the
+     * parent accordion in the sidebar, which is what makes the reader's open folders disappear once they
+     * click into a child page. When the page simply inherits a folder menu -- rather than being the
+     * folder landing page or carrying its own override -- show the parent menu and expand this menu under
+     * it instead.
      */
-    async showPageNavigation(id) {
-      const base = this.nav.stack[0]
-      if (base?.currentId === id) {
-        this.$patch({ nav: { currentId: base.currentId, items: base.items, stack: [] } })
+     async showPageNavigation(id, { path = '', locale = this.locale } = {}) {
+      if (!id) {
+        return
+      }
+      const pagePathInfo = await this.fetchNavigationPathInfo(path, locale)
+      let displayId = id
+      let contextId = null
+      let displayItems = null
+
+      /*
+        The candidate parent has to be a menu that actually shows this menu. The path endpoint says what a
+        page inherits, but a site may keep a folder's menu separate from its parent's authored menu --
+        checking the parent items avoids replacing the real sidebar with a root menu that has no way back
+        to it.
+      */
+      if (pagePathInfo.navigationId === id) {
+        const parentPath = await this.fetchNavigationParentPath(id)
+        if (parentPath) {
+          const parentPathInfo = await this.fetchNavigationPathInfo(parentPath.path, parentPath.locale)
+          const parentNavId = parentPathInfo.navigationId
+          if (parentNavId && parentNavId !== id) {
+            const parentItems = await API_CLIENT.get(`sites/${this.id}/navigation/${parentNavId}`)
+              .json()
+              .catch((err) => {
+                console.warn(err.message)
+                return null
+              })
+            const containsCurrentMenu = (items) =>
+              (items ?? []).some(
+                (item) =>
+                  item.targetNavId === id || containsCurrentMenu(item.children)
+              )
+            if (containsCurrentMenu(parentItems)) {
+              displayId = parentNavId
+              contextId = id
+              displayItems = parentItems ?? []
+            }
+          }
+        }
+      }
+
+      if (this.nav.currentId === id && this.nav.contextId === contextId) {
         await this.refreshNavigation()
-      } else if (this.nav.stack.length > 0 || id !== this.nav.currentId) {
-        await this.fetchNavigation(id)
       } else {
-        // -> The same menu as the page before, which may still have changed since it was read
-        await this.refreshNavigation()
+        const items =
+          displayItems ??
+          (await API_CLIENT.get(`sites/${this.id}/navigation/${displayId}`)
+            .json()
+            .catch((err) => {
+              console.warn(err.message)
+              return null
+            }))
+        this.$patch((state) => {
+          state.nav = {
+            currentId: id,
+            displayId,
+            contextId,
+            items: items ?? [],
+            stack: []
+          }
+        })
+      }
+      if (contextId) {
+        this.expandNavGroup(`m:${contextId}`)
       }
       await this.loadNavigationParent()
     },
@@ -770,22 +1022,21 @@ export const useSiteStore = defineStore('site', {
      * makes to pages or the tree (the `contentChanged` event), so it costs one small request each time,
      * and nothing at all on screen while the answer is the same.
      *
-     * Only the page's own menu, never one opened from a `menu` item: that is somewhere the reader went,
-     * and swapping it under them would undo the step. Dropped if the sidebar moved on meanwhile, and
-     * quiet on failure -- the menu already on screen is still a menu.
+     * Only the display menu -- the page's own menu, or the parent menu shown around it. Dropped if the
+     * sidebar moved on meanwhile, and quiet on failure -- the menu already on screen is still a menu.
      */
     async refreshNavigation() {
-      const id = this.nav.currentId
-      if (!id || this.nav.stack.length > 0) {
+      const id = this.nav.displayId || this.nav.currentId
+      if (!id) {
         return
       }
       try {
         const items = (await API_CLIENT.get(`sites/${this.id}/navigation/${id}`).json()) ?? []
-        if (this.nav.currentId !== id || this.nav.stack.length > 0) {
+        if ((this.nav.displayId || this.nav.currentId) !== id) {
           return
         }
         if (JSON.stringify(items) !== JSON.stringify(this.nav.items)) {
-          this.$patch({ nav: { items } })
+          this.nav.items = items
         }
       } catch (err) {
         console.warn(err.message)

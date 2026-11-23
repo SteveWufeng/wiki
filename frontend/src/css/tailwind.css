@@ -72,15 +72,15 @@
   keeps runtime theming working. Do not inline these.
 */
 :root {
-  --q-primary: #1976d2;
+  --q-primary: #5e8ab4;
   --q-secondary: #02c39a;
   --q-accent: #f03a47;
   --q-positive: #02c39a;
   --q-negative: #f03a47;
   --q-info: #3e6990;
   --q-warning: #f99d4d;
-  --q-header: #000;
-  --q-sidebar: #1976d2;
+  --q-header: #041e42;
+  --q-sidebar: #5e8ab4;
 }
 
 /*

@@ -28,108 +28,34 @@
       </w-list>
     </nav>
     <w-list class="sidebar-nav-list" clickable dense dark>
-      <!-- -> Only in a menu opened from a `menu` item: back to the one it was opened from -->
-      <template v-if="siteStore.nav.stack.length > 0">
-        <w-item clickable @click="siteStore.closeNavigationMenu">
-          <w-item-section side><w-icon name="la:arrow-left" color="white" /></w-item-section>
-          <w-item-section class="text-white">{{ t('navEdit.goBack') }}</w-item-section>
-        </w-item>
-        <w-separator dark />
-      </template>
       <!--
-        Otherwise, where the site has it on: up to the page or folder above the one owning the menu.
-        Never on a locale's root menu, which has nothing above it -- the server answers no parent.
+        Up to the page or folder above the one owning the menu, where the site has it on. Never on a
+        locale's root menu, which has nothing above it -- the server answers no parent.
       -->
-      <template v-else-if="parentHref">
+      <template v-if="parentHref">
         <w-item :to="parentHref">
           <w-item-section side><w-icon name="la:arrow-up" color="white" /></w-item-section>
           <w-item-section class="text-white">{{ t('navEdit.goUp') }}</w-item-section>
         </w-item>
         <w-separator dark />
       </template>
-      <template v-for="item of siteStore.nav.items" :key="item.id">
-        <w-item-label
-          class="sidebar-nav-header text-caption wrap-anywhere"
-          v-if="item.type === `header`"
-          header
-          >{{ item.label }}</w-item-label
-        >
-        <!-- -> Open from the start when the page being read is one of its children, so a reader arriving
-                by URL sees where they are in the tree -- or when the menu says this group opens that way
-                whatever is being read. Not `v-model`: after that first render the group is the reader's
-                to open and close, and a bound value would fight them -->
-        <w-expansion-item
-          v-else-if="item.type === `link` && item.children?.length > 0"
-          dense
-          :default-opened="item.expandByDefault || containsCurrent(item)">
-          <!-- The icon goes through a header slot rather than the `icon` prop, so that an Iconify -->
-          <!-- reference is drawn by w-icon like everywhere else -->
-          <template #header>
-            <w-item-section side><w-icon :name="item.icon" color="white" /></w-item-section>
-            <w-item-section class="wrap-anywhere text-white">{{ item.label }}</w-item-section>
-          </template>
-          <w-list clickable dense dark>
-            <w-item
-              v-for="itemChild of item.children"
-              v-bind="destination(itemChild)"
-              :key="itemChild.id">
-              <w-item-section side><w-icon :name="itemChild.icon" color="white" /></w-item-section>
-              <w-item-section class="wrap-anywhere text-white">{{
-                itemChild.label
-              }}</w-item-section>
-            </w-item>
-          </w-list>
-        </w-expansion-item>
-        <w-item v-else-if="item.type === `link`" v-bind="destination(item)">
-          <w-item-section side><w-icon :name="item.icon" color="white" /></w-item-section>
-          <w-item-section class="wrap-anywhere text-white">{{ item.label }}</w-item-section>
-        </w-item>
-        <!--
-          Two ways in on one row, where the item links to the page at the target menu's location too:
-          the row goes to the page and the chevron, a control of its own, opens the menu. Two siblings
-          rather than a button inside the link -- an interactive element inside an anchor is not one
-          either a browser or a screen reader can be trusted with.
-        -->
-        <div v-else-if="item.type === `menu` && item.targetPage != null" class="sidebar-nav-split">
-          <!-- -> `dense` on each: the list's own density reaches its direct rows only, and these two
-                  sit in the split row's box -->
-          <w-item class="sidebar-nav-split__link" dense :to="pageHref(item.targetPage)">
-            <w-item-section side><w-icon :name="item.icon" color="white" /></w-item-section>
-            <w-item-section class="wrap-anywhere text-white">{{ item.label }}</w-item-section>
-          </w-item>
-          <w-item
-            class="sidebar-nav-split__menu"
-            dense
-            clickable
-            :aria-label="t('navEdit.showMenu', { label: item.label })"
-            @click="siteStore.openNavigationMenu(item.targetNavId)">
-            <w-item-section side><w-icon name="mdi:chevron-right" color="white" /></w-item-section>
-          </w-item>
-        </div>
-        <!-- -> Drawn as a link, with a chevron for what it does instead: open a menu, not a page -->
-        <w-item
-          v-else-if="item.type === `menu`"
-          clickable
-          @click="siteStore.openNavigationMenu(item.targetNavId)">
-          <w-item-section side><w-icon :name="item.icon" color="white" /></w-item-section>
-          <w-item-section class="wrap-anywhere text-white">{{ item.label }}</w-item-section>
-          <w-item-section side><w-icon name="mdi:chevron-right" color="white" /></w-item-section>
-        </w-item>
-        <w-separator v-else-if="item.type === `separator`" dark />
-      </template>
+      <!--
+        The menu itself, each row drawn by the recursive NavItem: a leaf is a link, a folder or a nested
+        link group is an in-place accordion. Folders open here rather than replacing the sidebar, so the
+        tree the reader is looking at never gets pulled out from under them.
+      -->
+      <NavItem v-for="item of siteStore.nav.items" :key="item.id" :item="item" />
     </w-list>
   </w-scroll-area>
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
-import { useRouter, useRoute } from 'vue-router'
+import { computed, onBeforeUnmount, onMounted, provide, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import { debounce } from 'es-toolkit/function'
 
-import { decodeUrlPath } from '@/helpers/pagePaths'
-import { routableHref } from '@/helpers/renderedContent'
+import NavItem from './NavItem.vue'
 
 import { useCommonStore } from '@/stores/common'
 import { usePageStore } from '@/stores/page'
@@ -141,10 +67,16 @@ const commonStore = useCommonStore()
 const pageStore = usePageStore()
 const siteStore = useSiteStore()
 
-// ROUTER
-
-const router = useRouter()
-const route = useRoute()
+/**
+ * Which nav groups stand open, by group key. Held here -- not per item -- so a reader's open/closed
+ * choices survive moving between pages while the sidebar stays mounted, and every recursive NavItem
+ * shares one source of truth.
+ */
+provide('navExpanded', {
+  has: (key) => siteStore.isNavGroupExpanded(key),
+  add: (key) => siteStore.expandNavGroup(key),
+  delete: (key) => siteStore.collapseNavGroup(key)
+})
 
 // I18N
 
@@ -228,47 +160,6 @@ async function loadFolderPages() {
 }
 
 /**
- * Where a nav item points, as the props that take a reader there.
- *
- * An administrator types this address by hand and it can be anything: a path in this wiki, a URL on
- * another site, a `mailto:`. Only the first of those is the router's, and handing it the others is what
- * made an external link land on "This page does not exist yet" -- vue-router matched
- * `https://example.com/x` as a PATH, found nothing, and fell through to the catch-all page view.
- *
- * The question is the one `routableHref` already answers for the links inside a rendered page, so it is
- * the same function that answers it here rather than a second opinion that can drift from it. Which also
- * settles two cases beyond the reported one: an item pointing into `/_files/` now downloads the file
- * instead of 404ing, and one pointing at `#a-heading` on this page jumps to it.
- *
- * `openInNewWindow`, set per link in the navigation editor, is fed into the same question rather than
- * added on afterwards: a link asking for a new tab is one `routableHref` declines whatever it points at,
- * on the grounds that a new context is the browser's to open and not the router's to swap in. So such an
- * item goes out as a plain anchor -- which loads this app fresh in the new tab, which is what a new tab
- * does in any case.
- *
- * Mind the two meanings of "target" in here: a nav item's is the address to go to, an anchor's is the
- * window to open it in.
- */
-function destination(item) {
-  const address = item.target ?? '/'
-  const target = item.openInNewWindow ? '_blank' : undefined
-  let url
-  try {
-    url = new URL(address, globalThis.location.href)
-  } catch {
-    // -> Not a URL at all: nothing a reader could be taken to
-    return {}
-  }
-  // -> The server refuses any other scheme on save (`isNavLinkTarget`), and this is the same line
-  //    drawn where it matters: a `javascript:` href is script run in this origin by whoever clicks it
-  if (!['http:', 'https:', 'mailto:'].includes(url.protocol)) {
-    return {}
-  }
-  const routable = routableHref({ href: url.href, target }, globalThis.location)
-  return routable ? { to: routable } : { href: address, target }
-}
-
-/**
  * Where "Go up" leads: the parent the server named for the menu on screen, while it is that menu's
  * and the site shows the link. The locale's root, for a menu owned at its top level.
  */
@@ -290,41 +181,23 @@ function pageHref(path) {
   return path === 'home' ? prefix || '/' : `${prefix}/${path}`
 }
 
-/**
- * Whether a nav item points at the page being read.
- *
- * Only a routed item can be: an address that leaves the wiki is never where the reader already is, and
- * one that opens in a new tab is not asking to be here either. Asked of the router rather than compared
- * as strings, so a trailing slash, an escape or a redirect is settled the same way the router settles it
- * when the reader actually clicks.
- *
- * This is only used to decide which groups open on arrival. The dent itself is drawn off
- * `router-link-exact-active`, the class `RouterLink` puts on the row it has taken the reader to -- the
- * same question, answered by the same router, but kept up to date by the link itself as the reader moves
- * around rather than recomputed here.
- */
-function isCurrent(item) {
-  const { to } = destination(item)
-  // -> Decoded on both sides: either may be percent-encoded, depending on how it was arrived at
-  return Boolean(to) && decodeUrlPath(router.resolve(to).path) === decodeUrlPath(route.path)
-}
-
-/** ...and whether one of a group's children is, which is what opens the group. */
-function containsCurrent(item) {
-  return (item.children ?? []).some((child) => isCurrent(child))
-}
-
 // WATCHERS
+
+watch(
+  () => [siteStore.id, pageStore.locale],
+  ([siteId, locale]) => siteStore.loadNavExpanded(siteId, locale),
+  { immediate: true }
+)
 
 /*
   On every page load and not only when the page's menu changes: a menu opened from a `menu` item is put
   away by following a link out of it, even to a page that resolves to the very menu that was open.
 */
 watch(
-  () => [pageStore.id, pageStore.navigationId],
-  ([, navigationId]) => {
+  () => [pageStore.id, pageStore.navigationId, pageStore.path, pageStore.locale],
+  ([, navigationId, path, locale]) => {
     if (navigationId) {
-      siteStore.showPageNavigation(navigationId)
+      siteStore.showPageNavigation(navigationId, { path, locale })
     }
   },
   { immediate: true }
@@ -336,6 +209,7 @@ watch(
   action is often several writes: a move with its links updated, a folder rename with its title.
 */
 const onContentChanged = debounce(() => {
+  siteStore.clearNavigationPathCache()
   siteStore.refreshNavigation()
   // -> A page created, moved, retitled or deleted under this one changes the folder list too
   loadFolderPages()

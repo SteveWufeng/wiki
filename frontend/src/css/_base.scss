@@ -45,18 +45,18 @@ body::-webkit-scrollbar-thumb {
 // ------------------------------------------------------------------
 
 :root {
-  --q-header: #000;
-  --q-sidebar: #1976d2;
+  --q-header: #041e42;
+  --q-sidebar: #5e8ab4;
 }
 
 .header,
 .bg-header {
-  background: #000;
+  background: #041e42;
   background: var(--q-header);
 }
 .sidebar,
 .bg-sidebar {
-  background: #1976d2;
+  background: #5e8ab4;
   background: var(--q-sidebar);
 }
 

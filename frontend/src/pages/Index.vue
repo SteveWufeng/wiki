@@ -63,7 +63,7 @@
     <!-- -> Shrunk rather than put away like the bars above it: it is what says which page this is.
             How far is the tier's, in `_page-chrome.scss`. Same state, same file -->
     <page-header
-      v-if="!pageStore.notFound"
+      v-if="showHeaderInChrome"
       :class="{
         'is-aligned': headerBounds !== null,
         'is-collapsible': isChromeActive,
@@ -217,6 +217,7 @@
               since it is the lid of the column and is drawn to its edges whatever the theme says.
             -->
             <div class="page-measure">
+              <page-header v-if="showHeaderInContent" class="page-header--in-content" />
               <!--
                 That this page is a post, and of what. A wiki page and a blog post look identical
                 otherwise -- the breadcrumbs above name the folder rather than the blog, and nothing
@@ -411,6 +412,8 @@
                 inline
                 :content-root="pageContents" />
               <page-comments-embed v-if="showCommentsEmbed" />
+              <page-prev-next
+                v-if="activeView === `article` && !isBlog && !isFeedbackBoard" />
             </div>
           </div>
           <!--
@@ -759,6 +762,7 @@ import FooterNav from '@/components/FooterNav.vue'
 import LoadingGeneric from '@/components/LoadingGeneric.vue'
 import PageActionsCol from '@/components/PageActionsCol.vue'
 import PageHeader from '@/components/PageHeader.vue'
+import PagePrevNext from '@/components/PagePrevNext.vue'
 import PageRedirect from '@/components/PageRedirect.vue'
 import PageTags from '@/components/PageTags.vue'
 import PageToc from '@/components/PageToc.vue'
@@ -1397,6 +1401,14 @@ const {
   expand: expandChrome
 } = useCollapsingChrome()
 const isChromeActive = computed(() => !editorStore.isActive)
+const showHeaderInContent = computed(
+  () =>
+    !editorStore.isActive &&
+    !pageStore.notFound &&
+    !pageStore.isLocked &&
+    pageStore.editor !== 'redirect'
+)
+const showHeaderInChrome = computed(() => !pageStore.notFound && !showHeaderInContent.value)
 const breadcrumbBar = ref(null)
 
 trackChromeScroll(() => pageScroller.value?.$el)

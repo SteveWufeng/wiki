@@ -399,6 +399,54 @@ $toc-overlay-max: 749.98px;
   }
 }
 /*
+  The same header when it is part of the scrolling article rather than pinned chrome above it. It keeps
+  the title, icon and actions, but sheds the bar treatment: the point is for the page to read as content
+  the reader scrolls past, not as chrome that stays in front of the article.
+*/
+.page-header--in-content {
+  height: auto;
+  min-height: 0;
+  border-top: 0;
+  border-bottom: 0;
+  background: none;
+  margin-bottom: 1rem;
+
+  &::before,
+  &::after {
+    display: none;
+  }
+
+  .page-header-icon {
+    padding-inline-start: 0;
+  }
+
+  .page-header-text {
+    padding: 0;
+    max-width: none;
+  }
+
+  .page-header-title {
+    font-size: 1.75rem;
+    line-height: 2.25rem;
+  }
+
+  .page-header-actions {
+    padding: 0;
+    padding-inline-start: 1rem;
+    margin-inline-start: auto;
+  }
+
+  @media (max-width: $breakpoint-xs-max) {
+    margin-bottom: 0.75rem;
+
+    .page-header-title {
+      font-size: 1.5rem;
+      line-height: 2rem;
+    }
+  }
+}
+
+/*
   The chrome giving way to the article as it is scrolled -- `composables/collapsingChrome.js` decides
   when and which bars at which size, and says why the bars collapse rather than slide over the article.
 
